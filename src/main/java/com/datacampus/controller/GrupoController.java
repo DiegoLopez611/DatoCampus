@@ -28,4 +28,12 @@ public class GrupoController {
         return ResponseEntity.ok(grupoService.asignarDocente(idGrupo, request));
     }
 
+    @PostMapping("/{idGrupo}/clases")
+    public ResponseEntity<ClaseCrearResponse> crearClase(
+            @PathVariable Integer idGrupo,
+            @RequestBody ClaseCrearRequest request) {
+
+        return ResponseEntity.ok(grupoService.crearClase(idGrupo, request));
+    }
+
 }

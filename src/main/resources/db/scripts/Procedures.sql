@@ -299,6 +299,72 @@ CREATE OR REPLACE PACKAGE BODY PKG_GRUPO AS
                 P_MENSAJE := SQLERRM;
     END ASIGNAR_DOCENTE;
 
+
+    PROCEDURE CREAR_CLASE(
+        P_ID_GRUPO     IN NUMBER,
+        P_DIA          IN VARCHAR2,
+        P_HORA_INICIO  IN VARCHAR2,
+        P_HORA_FIN     IN VARCHAR2,
+        P_ID_AULA      IN NUMBER,
+        P_ID_CLASE     OUT NUMBER,
+        P_MENSAJE      OUT VARCHAR2
+    ) IS
+        v_inicio DATE;
+        v_fin    DATE;
+    BEGIN
+
+    -- Convertir horas a formato TIME/DATE
+
+        v_inicio := TO_DATE(P_HORA_INICIO, 'HH24:MI');
+        v_fin    := TO_DATE(P_HORA_FIN,    'HH24:MI');
+
+        IF v_fin <= v_inicio THEN
+            RAISE_APPLICATION_ERROR(-30001, 'La hora fin debe ser mayor.');
+    END IF;
+
+
+    -- Validar que el grupo existe
+
+        IF NOT EXISTS (SELECT 1 FROM GRUPO WHERE id_grupo = P_ID_GRUPO) THEN
+            RAISE_APPLICATION_ERROR(-30002, 'El grupo no existe.');
+    END IF;
+
+
+    -- Validar que el aula existe
+
+        IF NOT EXISTS (SELECT 1 FROM AULA WHERE id_aula = P_ID_AULA) THEN
+            RAISE_APPLICATION_ERROR(-30003, 'El aula no existe.');
+    END IF;
+
+
+    -- Validar choque de horario en el aula
+
+        IF EXISTS (
+            SELECT 1
+            FROM CLASE c
+            WHERE c.id_aula = P_ID_AULA
+              AND c.dia = P_DIA
+              AND v_inicio < c.hora_fin
+              AND v_fin > c.hora_inicio
+        ) THEN
+            RAISE_APPLICATION_ERROR(-30004, 'El aula está ocupada en ese horario.');
+    END IF;
+
+
+    Insertar (trigger crea ID)
+
+    INSERT INTO CLASE(dia, hora_inicio, hora_fin, id_grupo, id_aula)
+    VALUES (P_DIA, v_inicio, v_fin, P_ID_GRUPO, P_ID_AULA)
+        RETURNING id_clase INTO P_ID_CLASE;
+
+    P_MENSAJE := 'Clase creada correctamente.';
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            P_ID_CLASE := NULL;
+            P_MENSAJE := SQLERRM;
+    END CREAR_CLASE;
+
 END PKG_GRUPO;
 /
 

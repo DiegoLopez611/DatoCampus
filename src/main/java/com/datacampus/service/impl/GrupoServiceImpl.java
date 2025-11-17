@@ -87,4 +87,41 @@ public class GrupoServiceImpl implements GrupoService {
             );
         }
     }
+
+    @Override
+    public ClaseCrearResponse crearClase(Integer idGrupo, ClaseCrearRequest request) {
+        try {
+            SimpleJdbcCall call = new SimpleJdbcCall(jdbc)
+                    .withCatalogName("PKG_GRUPO")
+                    .withProcedureName("CREAR_CLASE")
+                    .declareParameters(
+                            new SqlParameter("P_ID_GRUPO", OracleTypes.NUMBER),
+                            new SqlParameter("P_DIA", OracleTypes.VARCHAR),
+                            new SqlParameter("P_HORA_INICIO", OracleTypes.VARCHAR),
+                            new SqlParameter("P_HORA_FIN", OracleTypes.VARCHAR),
+                            new SqlParameter("P_ID_AULA", OracleTypes.NUMBER),
+                            new SqlOutParameter("P_ID_CLASE", OracleTypes.NUMBER),
+                            new SqlOutParameter("P_MENSAJE", OracleTypes.VARCHAR)
+                    );
+
+            Map<String, Object> out = call.execute(
+                    idGrupo,
+                    request.dia(),
+                    request.horaInicio(),
+                    request.horaFin(),
+                    request.idAula()
+            );
+
+            Integer idClase = out.get("P_ID_CLASE") != null
+                    ? ((Number) out.get("P_ID_CLASE")).intValue()
+                    : null;
+
+            String mensaje = (String) out.get("P_MENSAJE");
+
+            return new ClaseCrearResponse(idGrupo, idClase, mensaje);
+
+        } catch (DataAccessException e) {
+            return new ClaseCrearResponse(idGrupo, null, "ERROR BD: " + e.getMostSpecificCause().getMessage());
+        }
+    }
 }
