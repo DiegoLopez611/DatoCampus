@@ -68,3 +68,36 @@ CREATE OR REPLACE PACKAGE PKG_GRUPO AS
 
 END PKG_GRUPO;
 /
+
+/*
+    Se degine el paquete con los procedimientos usados para la gestión de las notas.
+ */
+
+CREATE OR REPLACE PACKAGE PKG_NOTA AS
+
+    PROCEDURE CREAR_NOTA(
+        P_ID_DETALLE   IN NUMBER,
+        P_ID_CONFIG    IN NUMBER,
+        P_VALOR        IN NUMBER,
+        P_ID_NOTA      OUT NUMBER,
+        P_MENSAJE      OUT VARCHAR2
+    );
+
+    PROCEDURE EDITAR_NOTA(
+        P_ID_NOTA   IN NUMBER,
+        P_VALOR     IN NUMBER,
+        P_MENSAJE   OUT VARCHAR2
+    );
+
+    PROCEDURE LISTAR_NOTAS_ESTUDIANTE(
+        P_ID_ESTUDIANTE IN NUMBER,
+        P_CURSOR        OUT SYS_REFCURSOR
+    );
+
+    PROCEDURE LISTAR_NOTAS_GRUPO(
+        P_ID_GRUPO IN NUMBER,
+        P_CURSOR   OUT SYS_REFCURSOR
+    );
+
+END PKG_NOTA;
+/

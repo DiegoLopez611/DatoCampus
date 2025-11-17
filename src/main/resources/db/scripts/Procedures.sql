@@ -369,4 +369,94 @@ END PKG_GRUPO;
 /
 
 
+CREATE OR REPLACE PACKAGE BODY PKG_NOTA AS
+
+    PROCEDURE CREAR_NOTA(
+        P_ID_DETALLE   IN NUMBER,
+        P_ID_CONFIG    IN NUMBER,
+        P_VALOR        IN NUMBER,
+        P_ID_NOTA      OUT NUMBER,
+        P_MENSAJE      OUT VARCHAR2
+    ) IS
+    BEGIN
+    INSERT INTO NOTA(id_detalle_matricula, id_configuracion_nota, valor, fecha)
+    VALUES (P_ID_DETALLE, P_ID_CONFIG, P_VALOR, SYSDATE)
+        RETURNING id_nota INTO P_ID_NOTA;
+
+    P_MENSAJE := 'Nota registrada correctamente.';
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            P_MENSAJE := SQLERRM;
+    END CREAR_NOTA;
+
+    PROCEDURE EDITAR_NOTA(
+        P_ID_NOTA   IN NUMBER,
+        P_VALOR     IN NUMBER,
+        P_MENSAJE   OUT VARCHAR2
+    ) IS
+    BEGIN
+    UPDATE NOTA
+    SET valor = P_VALOR,
+        fecha = SYSDATE
+    WHERE id_nota = P_ID_NOTA;
+
+    IF SQL%ROWCOUNT = 0 THEN
+            RAISE_APPLICATION_ERROR(-30001, 'La nota no existe.');
+    END IF;
+
+        P_MENSAJE := 'Nota modificada correctamente.';
+
+    EXCEPTION
+        WHEN OTHERS THEN
+            P_MENSAJE := SQLERRM;
+    END EDITAR_NOTA;
+
+    PROCEDURE LISTAR_NOTAS_ESTUDIANTE(
+        P_ID_ESTUDIANTE IN NUMBER,
+        P_CURSOR        OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+    OPEN P_CURSOR FOR
+    SELECT n.id_nota,
+           a.nombre AS asignatura,
+           t.nombre AS tipo_nota,
+           n.valor,
+           c.porcentaje
+    FROM NOTA n
+             JOIN DETALLE_MATRICULA d ON d.id_detalle_matricula = n.id_detalle_matricula
+             JOIN GRUPO g ON g.id_grupo = d.id_grupo
+             JOIN ASIGNATURA a ON a.id_asignatura = g.id_asignatura
+             JOIN CONFIGURACION_NOTA_GRUPO c ON c.id_configuracion_nota = n.id_configuracion_nota
+             JOIN TIPO_NOTA t ON t.id_tipo_nota = c.id_tipo_nota
+             JOIN MATRICULA_ACADEMICA m ON m.id_matricula_academica = d.id_matricula_academica
+    WHERE m.id_estudiante = P_ID_ESTUDIANTE;
+
+    END LISTAR_NOTAS_ESTUDIANTE;
+
+    PROCEDURE LISTAR_NOTAS_GRUPO(
+        P_ID_GRUPO IN NUMBER,
+        P_CURSOR   OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+    OPEN P_CURSOR FOR
+    SELECT n.id_nota,
+           a.nombre AS asignatura,
+           t.nombre AS tipo_nota,
+           n.valor,
+           c.porcentaje
+    FROM NOTA n
+             JOIN DETALLE_MATRICULA d ON d.id_detalle_matricula = n.id_detalle_matricula
+             JOIN CONFIGURACION_NOTA_GRUPO c ON c.id_configuracion_nota = n.id_configuracion_nota
+             JOIN TIPO_NOTA t ON t.id_tipo_nota = c.id_tipo_nota
+             JOIN GRUPO g ON g.id_grupo = d.id_grupo
+             JOIN ASIGNATURA a ON a.id_asignatura = g.id_asignatura
+    WHERE g.id_grupo = P_ID_GRUPO;
+    END LISTAR_NOTAS_GRUPO;
+
+END PKG_NOTA;
+/
+
+
+
 
