@@ -457,6 +457,140 @@ CREATE OR REPLACE PACKAGE BODY PKG_NOTA AS
 END PKG_NOTA;
 /
 
+CREATE OR REPLACE PACKAGE BODY PKG_REPORTES AS
+
+    -- 1) Matrícula y carga por periodo
+    PROCEDURE REP_MATRICULA_CARGA(
+        P_ID_PERIODO IN NUMBER,
+        P_CURSOR     OUT SYS_REFCURSOR
+    ) IS
+    BEGIN
+    OPEN P_CURSOR FOR
+    SELECT p.nombre AS programa,
+           s.nombre AS sede,
+           a.nombre AS asignatura,
+           g.nombre AS grupo,
+           COUNT(dm.id_detalle_matricula) AS inscritos,
+           a.numero_creditos AS creditos,
+           ROUND( (COUNT(dm.id_detalle_matricula) / aul.capacidad_maxima) * 100, 2) AS porcentaje_ocupacion
+    FROM MATRICULA_ACADEMICA m
+             JOIN DETALLE_MATRICULA dm ON dm.id_matricula_academica = m.id_matricula_academica
+             JOIN GRUPO g ON g.id_grupo = dm.id_grupo
+             JOIN ASIGNATURA a ON a.id_asignatura = g.id_asignatura
+             JOIN PROGRAMA_ACADEMICO p ON p.id_programa_academico = a.id_programa_academico
+             JOIN SEDE s ON s.id_sede = p.id_sede
+             JOIN CLASE c ON c.id_grupo = g.id_grupo
+             JOIN AULA aul ON aul.id_aula = c.id_aula
+    WHERE m.id_periodo_academico = P_ID_PERIODO
+    GROUP BY p.nombre, s.nombre, a.nombre, g.nombre, a.numero_creditos, aul.capacidad_maxima;
+    END REP_MATRICULA_CARGA;
+
+        -- 2) Top grupos por ocupación
+        PROCEDURE REP_TOP_GRUPOS(
+            P_ID_PERIODO IN NUMBER,
+            P_LIMITE     IN NUMBER,
+            P_CURSOR     OUT SYS_REFCURSOR
+        ) IS
+    BEGIN
+    OPEN P_CURSOR FOR
+    SELECT *
+    FROM (
+             SELECT s.nombre AS sede,
+                    CONCAT(pa.anio, '-', pa.semestre) AS periodo,
+                    a.nombre AS asignatura,
+                    g.nombre AS grupo,
+                    ROUND( (COUNT(dm.id_detalle_matricula) / aul.capacidad_maxima) * 100, 2) AS porcentaje_ocupacion
+             FROM MATRICULA_ACADEMICA m
+                      JOIN PERIODO_ACADEMICO pa ON pa.id_periodo_academico = m.id_periodo_academico
+                      JOIN DETALLE_MATRICULA dm ON dm.id_matricula_academica = m.id_matricula_academica
+                      JOIN GRUPO g ON g.id_grupo = dm.id_grupo
+                      JOIN ASIGNATURA a ON a.id_asignatura = g.id_asignatura
+                      JOIN PROGRAMA_ACADEMICO p ON p.id_programa_academico = a.id_programa_academico
+                      JOIN SEDE s ON s.id_sede = p.id_sede
+                      JOIN CLASE c ON c.id_grupo = g.id_grupo
+                      JOIN AULA aul ON aul.id_aula = c.id_aula
+             WHERE m.id_periodo_academico = P_ID_PERIODO
+             GROUP BY s.nombre, pa.anio, pa.semestre, a.nombre, g.nombre, aul.capacidad_maxima
+             ORDER BY porcentaje_ocupacion DESC
+         )
+    WHERE ROWNUM <= P_LIMITE;
+    END REP_TOP_GRUPOS;
+
+        -- 3) Intentos fallidos (asumo tabla INTENTO_MATRICULA para la entrega)
+        PROCEDURE REP_INTENTOS_FALLIDOS(
+            P_ID_PERIODO IN NUMBER,
+            P_CURSOR     OUT SYS_REFCURSOR
+        ) IS
+    BEGIN
+    OPEN P_CURSOR FOR
+    SELECT a.nombre AS asignatura,
+           g.nombre AS grupo,
+           im.motivo,
+           COUNT(*) AS cantidad
+    FROM INTENTO_MATRICULA im
+             JOIN GRUPO g ON g.id_grupo = im.id_grupo
+             JOIN ASIGNATURA a ON a.id_asignatura = g.id_asignatura
+    WHERE im.id_periodo_academico = P_ID_PERIODO
+    GROUP BY a.nombre, g.nombre, im.motivo;
+    END REP_INTENTOS_FALLIDOS;
+
+        -- 4) Rendimiento por asignatura
+        PROCEDURE REP_RENDIMIENTO_ASIG(
+            P_ID_PERIODO IN NUMBER,
+            P_CURSOR     OUT SYS_REFCURSOR
+        ) IS
+    BEGIN
+    OPEN P_CURSOR FOR
+    SELECT a.nombre AS asignatura,
+           CONCAT(pa.anio, '-', pa.semestre) AS periodo,
+           AVG(n.valor) AS promedio,
+           MIN(n.valor) AS nota_minima,
+           MAX(n.valor) AS nota_maxima,
+           STDDEV(n.valor) AS desviacion
+    FROM NOTA n
+             JOIN CONFIGURACION_NOTA_GRUPO c ON c.id_configuracion_nota_grupo = n.id_configuracion_nota_grupo
+             JOIN DETALLE_MATRICULA dm ON dm.id_detalle_matricula = n.id_detalle_matricula
+             JOIN MATRICULA_ACADEMICA m ON m.id_matricula_academica = dm.id_matricula_academica
+             JOIN PERIODO_ACADEMICO pa ON pa.id_periodo_academico = m.id_periodo_academico
+             JOIN GRUPO g ON g.id_grupo = c.id_grupo
+             JOIN ASIGNATURA a ON a.id_asignatura = g.id_asignatura
+    WHERE m.id_periodo_academico = P_ID_PERIODO
+    GROUP BY a.nombre, pa.anio, pa.semestre;
+    END REP_RENDIMIENTO_ASIG;
+
+        -- 5) Distribución de notas (rangos fijos)
+        PROCEDURE REP_DISTRIB_NOTAS(
+            P_ID_PERIODO IN NUMBER,
+            P_CURSOR     OUT SYS_REFCURSOR
+        ) IS
+    BEGIN
+    OPEN P_CURSOR FOR
+    SELECT a.nombre AS asignatura,
+           CONCAT(pa.anio, '-', pa.semestre) AS periodo,
+           CASE
+               WHEN n.valor < 3 THEN '0-2.9'
+               WHEN n.valor < 4 THEN '3.0-3.9'
+               ELSE '4.0-5.0'
+               END AS rango,
+           COUNT(*) AS cantidad
+    FROM NOTA n
+             JOIN CONFIGURACION_NOTA_GRUPO c ON c.id_configuracion_nota_grupo = n.id_configuracion_nota_grupo
+             JOIN DETALLE_MATRICULA dm ON dm.id_detalle_matricula = n.id_detalle_matricula
+             JOIN MATRICULA_ACADEMICA m ON m.id_matricula_academica = dm.id_matricula_academica
+             JOIN PERIODO_ACADEMICO pa ON pa.id_periodo_academico = m.id_periodo_academico
+             JOIN GRUPO g ON g.id_grupo = c.id_grupo
+             JOIN ASIGNATURA a ON a.id_asignatura = g.id_asignatura
+    WHERE m.id_periodo_academico = P_ID_PERIODO
+    GROUP BY a.nombre, pa.anio, pa.semestre,
+             CASE
+                 WHEN n.valor < 3 THEN '0-2.9'
+                 WHEN n.valor < 4 THEN '3.0-3.9'
+                 ELSE '4.0-5.0'
+                 END;
+    END REP_DISTRIB_NOTAS;
+END PKG_REPORTES;
+/
+
 
 
 
