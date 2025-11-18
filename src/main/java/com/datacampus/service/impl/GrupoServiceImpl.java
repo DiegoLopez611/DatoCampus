@@ -25,6 +25,7 @@ public class GrupoServiceImpl implements GrupoService {
             SimpleJdbcCall call = new SimpleJdbcCall(jdbc)
                     .withCatalogName("PKG_GRUPO")
                     .withProcedureName("CREAR_GRUPO")
+                    .withoutProcedureColumnMetaDataAccess()
                     .declareParameters(
                             new SqlParameter("P_NOMBRE", OracleTypes.VARCHAR),
                             new SqlParameter("P_ID_PERIODO", OracleTypes.NUMBER),
@@ -94,6 +95,7 @@ public class GrupoServiceImpl implements GrupoService {
             SimpleJdbcCall call = new SimpleJdbcCall(jdbc)
                     .withCatalogName("PKG_GRUPO")
                     .withProcedureName("CREAR_CLASE")
+                    .withoutProcedureColumnMetaDataAccess()
                     .declareParameters(
                             new SqlParameter("P_ID_GRUPO", OracleTypes.NUMBER),
                             new SqlParameter("P_DIA", OracleTypes.VARCHAR),

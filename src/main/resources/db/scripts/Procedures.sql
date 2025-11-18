@@ -219,23 +219,90 @@ END PKG_MATRICULA;
 CREATE OR REPLACE PACKAGE BODY PKG_GRUPO AS
 
     PROCEDURE CREAR_GRUPO(
-        P_NOMBRE        IN  VARCHAR2,
-        P_ID_PERIODO    IN  NUMBER,
-        P_ID_ASIGNATURA IN  NUMBER,
-        P_ID_GRUPO      OUT NUMBER,
-        P_MENSAJE       OUT VARCHAR2
-    ) IS
+        P_NOMBRE           IN  VARCHAR2,
+        P_ID_PERIODO       IN  NUMBER,
+        P_ID_ASIGNATURA    IN  NUMBER,
+        P_ID_GRUPO         OUT NUMBER,
+        P_MENSAJE          OUT VARCHAR2
+    ) AS
+        v_exists_periodo    NUMBER;
+        v_exists_asignatura NUMBER;
+        v_exists_grupo      NUMBER;
     BEGIN
-    INSERT INTO GRUPO(nombre, id_periodo_academico, id_asignatura)
-    VALUES (P_NOMBRE, P_ID_PERIODO, P_ID_ASIGNATURA)
-        RETURNING id_grupo INTO P_ID_GRUPO;
+            P_ID_GRUPO := NULL;
+            P_MENSAJE := NULL;
 
-    P_MENSAJE := 'Grupo creado correctamente.';
+            ------------------------------------------------
+            -- VALIDAR EXISTENCIA DEL PERIODO ACADÉMICO
+            ------------------------------------------------
+    SELECT COUNT(*) INTO v_exists_periodo
+    FROM PERIODO_ACADEMICO
+    WHERE id_periodo_academico = P_ID_PERIODO;
+
+    IF v_exists_periodo = 0 THEN
+                P_MENSAJE := 'ERROR: El periodo académico no existe';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------
+            -- VALIDAR EXISTENCIA DE LA ASIGNATURA
+            ------------------------------------------------
+    SELECT COUNT(*) INTO v_exists_asignatura
+    FROM ASIGNATURA
+    WHERE id_asignatura = P_ID_ASIGNATURA;
+
+    IF v_exists_asignatura = 0 THEN
+                P_MENSAJE := 'ERROR: La asignatura no existe';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------
+            -- VALIDAR DUPLICIDAD DEL GRUPO
+            ------------------------------------------------
+    SELECT COUNT(*) INTO v_exists_grupo
+    FROM GRUPO
+    WHERE nombre = P_NOMBRE
+      AND id_periodo_academico = P_ID_PERIODO
+      AND id_asignatura = P_ID_ASIGNATURA;
+
+    IF v_exists_grupo > 0 THEN
+                P_MENSAJE := 'ERROR: Ya existe un grupo con ese nombre para la asignatura y periodo';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------
+            -- INSERTAR GRUPO (TRIGGER ASIGNA EL ID)
+            ------------------------------------------------
+    INSERT INTO GRUPO(
+        nombre,
+        id_periodo_academico,
+        id_asignatura
+    ) VALUES (
+                 P_NOMBRE,
+                 P_ID_PERIODO,
+                 P_ID_ASIGNATURA
+             );
+
+    ------------------------------------------------
+    -- OBTENER EL ID GENERADO
+    ------------------------------------------------
+    SELECT id_grupo INTO P_ID_GRUPO
+    FROM (
+             SELECT id_grupo
+             FROM GRUPO
+             ORDER BY id_grupo DESC
+         )
+    WHERE ROWNUM = 1;
+
+    ------------------------------------------------
+    -- ÉXITO
+    ------------------------------------------------
+    P_MENSAJE := 'Grupo creado correctamente';
 
     EXCEPTION
             WHEN OTHERS THEN
                 P_ID_GRUPO := NULL;
-                P_MENSAJE := SQLERRM;
+                P_MENSAJE := 'ERROR PL/SQL: ' || SQLERRM;
     END CREAR_GRUPO;
 
     PROCEDURE ASIGNAR_DOCENTE(
@@ -301,68 +368,147 @@ CREATE OR REPLACE PACKAGE BODY PKG_GRUPO AS
 
 
     PROCEDURE CREAR_CLASE(
-        P_ID_GRUPO     IN NUMBER,
-        P_DIA          IN VARCHAR2,
-        P_HORA_INICIO  IN VARCHAR2,
-        P_HORA_FIN     IN VARCHAR2,
-        P_ID_AULA      IN NUMBER,
-        P_ID_CLASE     OUT NUMBER,
-        P_MENSAJE      OUT VARCHAR2
-    ) IS
-        v_inicio DATE;
-        v_fin    DATE;
+        P_ID_GRUPO       IN  NUMBER,
+        P_DIA            IN  VARCHAR2,
+        P_HORA_INICIO    IN  VARCHAR2,
+        P_HORA_FIN       IN  VARCHAR2,
+        P_ID_AULA        IN  NUMBER,
+        P_ID_CLASE       OUT NUMBER,
+        P_MENSAJE        OUT VARCHAR2
+    ) AS
+        v_exists_grupo   NUMBER;
+        v_exists_aula    NUMBER;
+        v_inicio         DATE;
+        v_fin            DATE;
+        v_ocupada        NUMBER;
+        v_id_asignatura   NUMBER;
+        v_horas_max       NUMBER;
+        v_horas_actuales  NUMBER;
+        v_horas_nuevas    NUMBER;
     BEGIN
+            P_ID_CLASE := NULL;
+            P_MENSAJE := NULL;
 
-    -- Convertir horas a formato TIME/DATE
+            ---------------------------------------------------
+            -- VALIDAR EXISTENCIA DEL GRUPO
+            ---------------------------------------------------
+    SELECT COUNT(*) INTO v_exists_grupo
+    FROM GRUPO
+    WHERE id_grupo = P_ID_GRUPO;
 
-        v_inicio := TO_DATE(P_HORA_INICIO, 'HH24:MI');
-        v_fin    := TO_DATE(P_HORA_FIN,    'HH24:MI');
-
-        IF v_fin <= v_inicio THEN
-            RAISE_APPLICATION_ERROR(-30001, 'La hora fin debe ser mayor.');
+    IF v_exists_grupo = 0 THEN
+                P_MENSAJE := 'ERROR: El grupo no existe';
+                RETURN;
     END IF;
 
+            ---------------------------------------------------
+            -- VALIDAR EXISTENCIA DEL AULA
+            ---------------------------------------------------
+    SELECT COUNT(*) INTO v_exists_aula
+    FROM AULA
+    WHERE id_aula = P_ID_AULA;
 
-    -- Validar que el grupo existe
-
-        IF NOT EXISTS (SELECT 1 FROM GRUPO WHERE id_grupo = P_ID_GRUPO) THEN
-            RAISE_APPLICATION_ERROR(-30002, 'El grupo no existe.');
+    IF v_exists_aula = 0 THEN
+                P_MENSAJE := 'ERROR: El aula no existe';
+                RETURN;
     END IF;
 
+            ---------------------------------------------------
+            -- CONVERTIR HORAS A DATE
+            ---------------------------------------------------
+            v_inicio := TO_DATE(P_HORA_INICIO, 'HH24:MI');
+            v_fin    := TO_DATE(P_HORA_FIN, 'HH24:MI');
 
-    -- Validar que el aula existe
-
-        IF NOT EXISTS (SELECT 1 FROM AULA WHERE id_aula = P_ID_AULA) THEN
-            RAISE_APPLICATION_ERROR(-30003, 'El aula no existe.');
+            IF v_inicio >= v_fin THEN
+                P_MENSAJE := 'ERROR: La hora de inicio debe ser menor que la hora fin';
+                RETURN;
     END IF;
 
+            ---------------------------------------------------
+            -- VALIDAR QUE EL AULA NO ESTÉ OCUPADA
+            ---------------------------------------------------
+    SELECT COUNT(*) INTO v_ocupada
+    FROM CLASE
+    WHERE id_aula = P_ID_AULA
+      AND dia = P_DIA
+      AND (
+        (v_inicio BETWEEN hora_inicio AND hora_fin)
+            OR (v_fin BETWEEN hora_inicio AND hora_fin)
+            OR (hora_inicio BETWEEN v_inicio AND v_fin)
+        );
 
-    -- Validar choque de horario en el aula
-
-        IF EXISTS (
-            SELECT 1
-            FROM CLASE c
-            WHERE c.id_aula = P_ID_AULA
-              AND c.dia = P_DIA
-              AND v_inicio < c.hora_fin
-              AND v_fin > c.hora_inicio
-        ) THEN
-            RAISE_APPLICATION_ERROR(-30004, 'El aula está ocupada en ese horario.');
+    IF v_ocupada > 0 THEN
+                P_MENSAJE := 'ERROR: El aula ya está ocupada en ese horario';
+                RETURN;
     END IF;
 
+            ---------------------------------------------------
+            -- VALIDAR QUE NO SUPERE LA CANTIDAD DE HORAS SEMANALES DE LA ASIGNATURA
+            ---------------------------------------------------
 
-    Insertar (trigger crea ID)
+            -- obtener asignatura del grupo
+    SELECT id_asignatura INTO v_id_asignatura
+    FROM grupo
+    WHERE id_grupo = P_ID_GRUPO;
 
-    INSERT INTO CLASE(dia, hora_inicio, hora_fin, id_grupo, id_aula)
-    VALUES (P_DIA, v_inicio, v_fin, P_ID_GRUPO, P_ID_AULA)
-        RETURNING id_clase INTO P_ID_CLASE;
+    -- horas máximas permitidas
+    SELECT horas_semanales INTO v_horas_max
+    FROM asignatura
+    WHERE id_asignatura = v_id_asignatura;
 
-    P_MENSAJE := 'Clase creada correctamente.';
+    -- horas acumuladas actualmente
+    SELECT COALESCE(SUM((hora_fin - hora_inicio) * 24), 0)
+    INTO v_horas_actuales
+    FROM clase
+    WHERE id_grupo = P_ID_GRUPO;
+
+    -- horas nuevas de esta clase
+    v_horas_nuevas := (v_fin - v_inicio) * 24;
+
+            -- validar límite
+            IF (v_horas_actuales + v_horas_nuevas) > v_horas_max THEN
+                P_MENSAJE := 'ERROR: Las horas semanales del grupo (' ||
+                             (v_horas_actuales + v_horas_nuevas) ||
+                             ') exceden las horas permitidas (' || v_horas_max || ') para la asignatura';
+                RETURN;
+    END IF;
+            ---------------------------------------------------
+            -- INSERTAR CLASE (el trigger asigna el ID)
+            ---------------------------------------------------
+    INSERT INTO CLASE(
+        dia,
+        hora_inicio,
+        hora_fin,
+        id_grupo,
+        id_aula
+    ) VALUES (
+                 P_DIA,
+                 v_inicio,
+                 v_fin,
+                 P_ID_GRUPO,
+                 P_ID_AULA
+             );
+
+    ---------------------------------------------------
+    -- OBTENER EL ID GENERADO (último insert)
+    ---------------------------------------------------
+    SELECT id_clase INTO P_ID_CLASE
+    FROM (
+             SELECT id_clase
+             FROM CLASE
+             ORDER BY id_clase DESC
+         )
+    WHERE ROWNUM = 1;
+
+    ---------------------------------------------------
+    -- ÉXITO
+    ---------------------------------------------------
+    P_MENSAJE := 'Clase creada correctamente';
 
     EXCEPTION
-        WHEN OTHERS THEN
-            P_ID_CLASE := NULL;
-            P_MENSAJE := SQLERRM;
+            WHEN OTHERS THEN
+                P_ID_CLASE := NULL;
+                P_MENSAJE := 'ERROR PL/SQL: ' || SQLERRM;
     END CREAR_CLASE;
 
 END PKG_GRUPO;
