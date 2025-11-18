@@ -171,6 +171,233 @@ CREATE OR REPLACE PACKAGE BODY PKG_MATRICULA AS
                 P_MENSAJE := 'ERROR PL/SQL: ' || SQLERRM;
     END INICIAR_MATRICULA;
 
+    PROCEDURE AGREGAR_GRUPO(
+        P_ID_MATRICULA IN NUMBER,
+        P_ID_GRUPO     IN NUMBER,
+        P_MENSAJE      OUT VARCHAR2
+    ) AS
+        v_exists_mat         NUMBER;
+        v_exists_grupo       NUMBER;
+        v_id_estudiante      NUMBER;
+        v_periodo_mat        NUMBER;
+        v_periodo_grupo      NUMBER;
+        v_asignatura_grupo   NUMBER;
+        v_asignatura_rep     NUMBER;
+
+        -- Cupos
+        v_cupos_usados       NUMBER;
+        v_cupo_maximo        NUMBER;
+
+        -- Choques
+        v_conflictos         NUMBER;
+
+        -- Riesgo y créditos
+        v_creditos_actuales    NUMBER;
+        v_creditos_asignatura  NUMBER;
+        v_creditos_nuevo       NUMBER;
+        v_creditos_maximos     NUMBER;
+    BEGIN
+            P_MENSAJE := NULL;
+
+            ------------------------------------------------------------
+            -- 1. Validar que la matrícula exista
+            ------------------------------------------------------------
+    SELECT COUNT(*) INTO v_exists_mat
+    FROM MATRICULA_ACADEMICA
+    WHERE id_matricula = P_ID_MATRICULA;
+
+    IF v_exists_mat = 0 THEN
+                P_MENSAJE := 'ERROR: La matrícula especificada no existe.';
+                RETURN;
+    END IF;
+
+    BEGIN
+    SELECT id_estudiante, id_periodo_academico
+    INTO v_id_estudiante, v_periodo_mat
+    FROM MATRICULA_ACADEMICA
+    WHERE id_matricula = P_ID_MATRICULA;
+    EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    P_MENSAJE := 'ERROR: No se pudieron obtener los datos de la matrícula.';
+                    RETURN;
+    END;
+
+            ------------------------------------------------------------
+            -- 2. Validar que el grupo exista
+            ------------------------------------------------------------
+    SELECT COUNT(*) INTO v_exists_grupo
+    FROM GRUPO
+    WHERE id_grupo = P_ID_GRUPO;
+
+    IF v_exists_grupo = 0 THEN
+                P_MENSAJE := 'ERROR: El grupo especificado no existe.';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------------------
+            -- 3. Validar que el grupo sea del MISMO periodo
+            ------------------------------------------------------------
+    BEGIN
+    SELECT id_periodo_academico, id_asignatura
+    INTO v_periodo_grupo, v_asignatura_grupo
+    FROM GRUPO
+    WHERE id_grupo = P_ID_GRUPO;
+    EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    P_MENSAJE := 'ERROR: No se encontraron datos del grupo.';
+                    RETURN;
+    END;
+
+            IF v_periodo_grupo <> v_periodo_mat THEN
+                P_MENSAJE := 'ERROR: El grupo pertenece a un periodo académico diferente al de la matrícula.';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------------------
+            -- 4. Validar que NO tenga ya la misma asignatura inscrita
+            ------------------------------------------------------------
+    SELECT COUNT(*) INTO v_asignatura_rep
+    FROM DETALLE_MATRICULA DM
+             JOIN GRUPO G ON DM.id_grupo = G.id_grupo
+    WHERE DM.id_matricula = P_ID_MATRICULA
+      AND G.id_asignatura = v_asignatura_grupo;
+
+    IF v_asignatura_rep > 0 THEN
+                P_MENSAJE := 'ERROR: La asignatura de este grupo ya está inscrita en la matrícula.';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------------------
+            -- 5. CALCULAR CUPO REAL DEL GRUPO (según AULA)
+            ------------------------------------------------------------
+
+            -- cupos usados
+    SELECT COUNT(*) INTO v_cupos_usados
+    FROM DETALLE_MATRICULA
+    WHERE id_grupo = P_ID_GRUPO;
+
+    -- cupo máximo = capacidad mínima de las aulas asociadas al grupo
+    BEGIN
+    SELECT MIN(A.capacidad_maxima)
+    INTO v_cupo_maximo
+    FROM CLASE C
+             JOIN AULA A ON C.id_aula = A.id_aula
+    WHERE C.id_grupo = P_ID_GRUPO;
+
+    EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    P_MENSAJE := 'ERROR: El grupo no tiene clases asociadas o no se encontraron aulas para calcular la capacidad.';
+                    RETURN;
+    END;
+
+            IF v_cupo_maximo IS NULL THEN
+                P_MENSAJE := 'ERROR: No fue posible determinar la capacidad del grupo (aulas sin capacidad definida).';
+                RETURN;
+    END IF;
+
+            IF v_cupos_usados >= v_cupo_maximo THEN
+                P_MENSAJE := 'ERROR: El grupo no tiene cupos disponibles. Capacidad: ' ||
+                              v_cupo_maximo || ', inscritos: ' || v_cupos_usados || '.';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------------------
+            -- 6. Validar choques de horario con grupos ya inscritos
+            ------------------------------------------------------------
+    SELECT COUNT(*) INTO v_conflictos
+    FROM CLASE C1
+             JOIN CLASE C2
+                  ON C2.id_grupo IN (
+                      SELECT id_grupo
+                      FROM DETALLE_MATRICULA
+                      WHERE id_matricula = P_ID_MATRICULA
+                  )
+    WHERE C1.id_grupo = P_ID_GRUPO
+      AND C1.dia = C2.dia
+      AND (
+        (C1.hora_inicio BETWEEN C2.hora_inicio AND C2.hora_fin)
+            OR (C1.hora_fin   BETWEEN C2.hora_inicio AND C2.hora_fin)
+            OR (C2.hora_inicio BETWEEN C1.hora_inicio AND C1.hora_fin)
+        );
+
+    IF v_conflictos > 0 THEN
+                P_MENSAJE := 'ERROR: El grupo genera un choque de horario con otros grupos ya inscritos.';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------------------
+            -- 7. Validar límite de créditos según riesgo académico
+            ------------------------------------------------------------
+    BEGIN
+    SELECT maximo_creditos
+    INTO v_creditos_maximos
+    FROM (
+             SELECT NR.maximo_creditos
+             FROM AUDITORIA_RIESGO AR
+                      JOIN NIVEL_RIESGO NR
+                           ON AR.id_nivel_riesgo = NR.id_nivel_riesgo
+             WHERE AR.id_estudiante = v_id_estudiante
+             ORDER BY AR.id_auditoria DESC
+         )
+    WHERE ROWNUM = 1;
+    EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    P_MENSAJE := 'ERROR: No se encontró información de nivel de riesgo para el estudiante (AUDITORIA_RIESGO).';
+                    RETURN;
+    END;
+
+            -- créditos del grupo que se intenta agregar
+    BEGIN
+    SELECT A.numero_creditos
+    INTO v_creditos_asignatura
+    FROM GRUPO G
+             JOIN ASIGNATURA A ON G.id_asignatura = A.id_asignatura
+    WHERE G.id_grupo = P_ID_GRUPO;
+    EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    P_MENSAJE := 'ERROR: No se pudieron obtener los créditos de la asignatura del grupo.';
+                    RETURN;
+    END;
+
+            -- créditos ya inscritos en la matrícula
+    SELECT NVL(SUM(A.numero_creditos), 0)
+    INTO v_creditos_actuales
+    FROM DETALLE_MATRICULA DM
+             JOIN GRUPO G ON DM.id_grupo = G.id_grupo
+             JOIN ASIGNATURA A ON G.id_asignatura = A.id_asignatura
+    WHERE DM.id_matricula = P_ID_MATRICULA;
+
+    v_creditos_nuevo := v_creditos_actuales + v_creditos_asignatura;
+
+            IF v_creditos_nuevo > v_creditos_maximos THEN
+                P_MENSAJE := 'ERROR: Se excede el límite de créditos permitido (' ||
+                              v_creditos_maximos || '). Créditos actuales: ' ||
+                              v_creditos_actuales || ', créditos del grupo: ' ||
+                              v_creditos_asignatura || ', total: ' ||
+                              v_creditos_nuevo || '.';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------------------
+            -- 8. INSERT FINAL EN DETALLE_MATRICULA
+            ------------------------------------------------------------
+    INSERT INTO DETALLE_MATRICULA(
+        id_matricula,
+        id_grupo,
+        nota_definitiva
+    ) VALUES (
+                 P_ID_MATRICULA,
+                 P_ID_GRUPO,
+                 NULL
+             );
+
+    P_MENSAJE := 'Grupo agregado correctamente a la matrícula.';
+
+    EXCEPTION
+            WHEN OTHERS THEN
+                P_MENSAJE := 'ERROR PL/SQL inesperado en AGREGAR_GRUPO: ' || SQLERRM;
+    END AGREGAR_GRUPO;
+
 END PKG_MATRICULA;
 /
 

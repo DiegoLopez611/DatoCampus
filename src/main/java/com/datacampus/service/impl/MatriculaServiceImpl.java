@@ -83,6 +83,7 @@ public class MatriculaServiceImpl implements MatriculaService {
             SimpleJdbcCall call = new SimpleJdbcCall(jdbc)
                     .withCatalogName("PKG_MATRICULA")
                     .withProcedureName("AGREGAR_GRUPO")
+                    .withoutProcedureColumnMetaDataAccess()
                     .declareParameters(
                             new SqlParameter("P_ID_MATRICULA", OracleTypes.NUMBER),
                             new SqlParameter("P_ID_GRUPO", OracleTypes.NUMBER),
