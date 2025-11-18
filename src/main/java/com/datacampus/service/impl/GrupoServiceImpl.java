@@ -60,6 +60,7 @@ public class GrupoServiceImpl implements GrupoService {
             SimpleJdbcCall call = new SimpleJdbcCall(jdbc)
                     .withCatalogName("PKG_GRUPO")
                     .withProcedureName("ASIGNAR_DOCENTE")
+                    .withoutProcedureColumnMetaDataAccess()
                     .declareParameters(
                             new SqlParameter("P_ID_GRUPO", OracleTypes.NUMBER),
                             new SqlParameter("P_ID_DOCENTE", OracleTypes.NUMBER),

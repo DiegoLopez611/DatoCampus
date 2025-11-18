@@ -3,6 +3,9 @@
     parametros de cada procedimiento y retornos.
  */
 
+CREATE OR REPLACE TYPE VARCHAR2_TABLE_TYPE AS TABLE OF VARCHAR2(200);
+/
+
 CREATE OR REPLACE PACKAGE PKG_MATRICULA AS
 
     -- Tabla para devolver asignaturas automáticas

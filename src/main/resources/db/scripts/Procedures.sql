@@ -1,217 +1,175 @@
 CREATE OR REPLACE PACKAGE BODY PKG_MATRICULA AS
 
     PROCEDURE INICIAR_MATRICULA(
-        P_ID_ESTUDIANTE      IN  NUMBER,
-        P_ID_PERIODO         IN  NUMBER,
-        P_ID_MATRICULA       OUT NUMBER,
-        P_ASIGNATURAS_AUTO   OUT T_VARCHAR_TABLE,
-        P_MENSAJE            OUT VARCHAR2
-    ) IS
+        P_ID_ESTUDIANTE    IN NUMBER,
+        P_ID_PERIODO       IN NUMBER,
+        P_ID_MATRICULA     OUT NUMBER,
+        P_ASIGNATURAS_AUTO OUT VARCHAR2_TABLE_TYPE,
+        P_MENSAJE          OUT VARCHAR2
+    ) AS
+        v_tiene_previas    NUMBER;
+        v_id_programa      NUMBER;
+        v_last_periodo     NUMBER;
+        v_count            NUMBER;
+        v_grupo            NUMBER;
     BEGIN
+            P_MENSAJE := NULL;
+            P_ID_MATRICULA := NULL;
+            P_ASIGNATURAS_AUTO := VARCHAR2_TABLE_TYPE();
 
-    INSERT INTO MATRICULA_ACADEMICA(id_matricula_academica, id_estudiante, id_periodo_academico, estado)
-    VALUES (SEQ_MATRICULA.NEXTVAL, P_ID_ESTUDIANTE, P_ID_PERIODO, 'ACTIVA')
-        RETURNING id_matricula_academica INTO P_ID_MATRICULA;
+            ---------------------------------------------------------
+            -- 1. VALIDAR ESTUDIANTE EXISTE
+            ---------------------------------------------------------
+    SELECT COUNT(*) INTO v_count
+    FROM ESTUDIANTE
+    WHERE id_estudiante = P_ID_ESTUDIANTE;
 
-    P_ASIGNATURAS_AUTO := T_VARCHAR_TABLE();
+    IF v_count = 0 THEN
+                P_MENSAJE := 'ERROR: El estudiante no existe';
+                RETURN;
+    END IF;
 
-    FOR r IN (
-                SELECT a.nombre, g.id_grupo
-                FROM ASIGNATURA a
-                JOIN GRUPO_ASIGNATURA g ON g.id_asignatura = a.id_asignatura
-                WHERE a.semestre = 1
+            ---------------------------------------------------------
+            -- 2. OBTENER PROGRAMA DEL ESTUDIANTE
+            ---------------------------------------------------------
+    SELECT id_programa_academico
+    INTO v_id_programa
+    FROM ESTUDIANTE
+    WHERE id_estudiante = P_ID_ESTUDIANTE;
+
+    ---------------------------------------------------------
+    -- 3. VALIDAR MATRÍCULAS PREVIAS
+    ---------------------------------------------------------
+    SELECT COUNT(*) INTO v_tiene_previas
+    FROM MATRICULA_ACADEMICA
+    WHERE id_estudiante = P_ID_ESTUDIANTE;
+
+    ---------------------------------------------------------
+    -- 4. CREAR MATRÍCULA ACTUAL
+    ---------------------------------------------------------
+    INSERT INTO MATRICULA_ACADEMICA(
+        id_estudiante,
+        id_periodo_academico
+    ) VALUES (
+                 P_ID_ESTUDIANTE,
+                 P_ID_PERIODO
+             )
+        RETURNING id_matricula INTO P_ID_MATRICULA;
+
+    ---------------------------------------------------------
+    -- CASO 1: SIN MATRÍCULAS PREVIAS (Primer semestre)
+    ---------------------------------------------------------
+    IF v_tiene_previas = 0 THEN
+
+                FOR rec IN (
+                    SELECT id_asignatura, nombre
+                    FROM ASIGNATURA
+                    WHERE semestre = 1
+                      AND id_programa_academico = v_id_programa
+                ) LOOP
+
+                    v_grupo := NULL;
+
+    BEGIN
+    SELECT id_grupo INTO v_grupo
+    FROM GRUPO
+    WHERE id_asignatura = rec.id_asignatura
+      AND id_periodo_academico = P_ID_PERIODO
+      AND ROWNUM = 1;
+    EXCEPTION
+                        WHEN NO_DATA_FOUND THEN
+                            P_MENSAJE := 'ERROR: No existe grupo para la asignatura '
+                                          || rec.nombre || ' en el periodo indicado';
+                            RETURN;
+    END;
+
+    INSERT INTO DETALLE_MATRICULA(
+        id_matricula,
+        id_grupo,
+        nota_definitiva
+    ) VALUES (
+                 P_ID_MATRICULA,
+                 v_grupo,
+                 NULL
+             );
+
+    P_ASIGNATURAS_AUTO.EXTEND;
+    P_ASIGNATURAS_AUTO(P_ASIGNATURAS_AUTO.LAST) := rec.nombre;
+    END LOOP;
+
+                P_MENSAJE := 'Matrícula iniciada. Cargadas asignaturas de primer semestre.';
+                RETURN;
+    END IF;
+
+            ---------------------------------------------------------
+            -- CASO 2: BUSCAR PERIODO ANTERIOR
+            ---------------------------------------------------------
+    SELECT MAX(id_periodo_academico)
+    INTO v_last_periodo
+    FROM MATRICULA_ACADEMICA
+    WHERE id_estudiante = P_ID_ESTUDIANTE
+      AND id_periodo_academico < P_ID_PERIODO;
+
+    ---------------------------------------------------------
+    -- CASO 2: ASIGNATURAS REPROBADAS
+    ---------------------------------------------------------
+    FOR rec IN (
+                SELECT A.id_asignatura, A.nombre
+                FROM DETALLE_MATRICULA DM
+                JOIN MATRICULA_ACADEMICA MA
+                  ON DM.id_matricula = MA.id_matricula
+                JOIN GRUPO G
+                  ON DM.id_grupo = G.id_grupo
+                JOIN ASIGNATURA A
+                  ON G.id_asignatura = A.id_asignatura
+                WHERE MA.id_estudiante = P_ID_ESTUDIANTE
+                  AND MA.id_periodo_academico = v_last_periodo
+                  AND DM.nota_definitiva < 3
             ) LOOP
 
-                INSERT INTO DETALLE_MATRICULA(id_detalle_matricula, id_matricula_academica, id_grupo)
-                VALUES (SEQ_DETALLE_MAT.NEXTVAL, P_ID_MATRICULA, r.id_grupo);
+                v_grupo := NULL;
 
-                P_ASIGNATURAS_AUTO.EXTEND;
-                P_ASIGNATURAS_AUTO(P_ASIGNATURAS_AUTO.LAST) := r.nombre;
+    BEGIN
+    SELECT id_grupo INTO v_grupo
+    FROM GRUPO
+    WHERE id_asignatura = rec.id_asignatura
+      AND id_periodo_academico = P_ID_PERIODO
+      AND ROWNUM = 1;
+
+    EXCEPTION
+                    WHEN NO_DATA_FOUND THEN
+                        P_MENSAJE := 'ERROR: No existe un grupo para la asignatura reprobada '
+                                      || rec.nombre || ' en el periodo actual.';
+                        RETURN;
+    END;
+
+    INSERT INTO DETALLE_MATRICULA(
+        id_matricula,
+        id_grupo,
+        nota_definitiva
+    ) VALUES (
+                 P_ID_MATRICULA,
+                 v_grupo,
+                 NULL
+             );
+
+    P_ASIGNATURAS_AUTO.EXTEND;
+    P_ASIGNATURAS_AUTO(P_ASIGNATURAS_AUTO.LAST) := rec.nombre;
     END LOOP;
-            P_MENSAJE := 'Matrícula iniciada correctamente.';
+
+            ---------------------------------------------------------
+            -- CASO 3: NO HAY AUTOMÁTICAS
+            ---------------------------------------------------------
+            IF P_ASIGNATURAS_AUTO.COUNT = 0 THEN
+                P_MENSAJE := 'Matrícula iniciada. No hay asignaturas automáticas.';
+    ELSE
+                P_MENSAJE := 'Matrícula iniciada con asignaturas automáticas por pérdida.';
+    END IF;
 
     EXCEPTION
             WHEN OTHERS THEN
-                P_MENSAJE := SQLERRM;
-    END;
-
-     PROCEDURE AGREGAR_GRUPO(
-        P_ID_MATRICULA   IN NUMBER,
-        P_ID_GRUPO       IN NUMBER,
-        P_MENSAJE        OUT VARCHAR2
-    ) IS
-
-        v_id_estudiante      NUMBER;
-        v_id_asignatura      NUMBER;
-        v_creditos_asig      NUMBER;
-        v_creditos_actuales  NUMBER;
-        v_riesgo             NUMBER;
-        v_max_creditos       NUMBER;
-        v_cupo_max           NUMBER;
-        v_cupo_actual        NUMBER;
-        v_hora_inicio        DATE;
-        v_hora_fin           DATE;
-        v_dia                VARCHAR2(20);
-
-    BEGIN
-    -----------------------------------------------------------------
-    -- 0. Obtener datos base
-    -----------------------------------------------------------------
-    SELECT m.id_estudiante
-    INTO v_id_estudiante
-    FROM MATRICULA_ACADEMICA m
-    WHERE m.id_matricula_academica = P_ID_MATRICULA;
-
-    -----------------------------------------------------------------
-    -- 1. Validar que el grupo existe
-    -----------------------------------------------------------------
-    SELECT g.id_asignatura, g.cupo_maximo, g.hora_inicio, g.hora_fin, g.dia
-    INTO v_id_asignatura, v_cupo_max, v_hora_inicio, v_hora_fin, v_dia
-    FROM GRUPO_ASIGNATURA g
-    WHERE g.id_grupo = P_ID_GRUPO;
-
-    -----------------------------------------------------------------
-    -- 2. Validar que no esté ya inscrita la asignatura
-    -----------------------------------------------------------------
-    IF EXISTS (
-            SELECT 1
-            FROM DETALLE_MATRICULA d
-            JOIN GRUPO_ASIGNATURA g ON g.id_grupo = d.id_grupo
-            WHERE d.id_matricula_academica = P_ID_MATRICULA
-              AND g.id_asignatura = v_id_asignatura
-        ) THEN
-            RAISE_APPLICATION_ERROR(-20001, 'La asignatura ya está registrada en la matrícula.');
-    END IF;
-
-    -----------------------------------------------------------------
-    -- 3. Validar que no haya aprobado ya la asignatura
-    -----------------------------------------------------------------
-    IF EXISTS (
-        SELECT 1
-        FROM HISTORIAL_ACADEMICO
-        WHERE id_estudiante = v_id_estudiante
-            AND id_asignatura = v_id_asignatura
-            AND estado = 'APROBADO'
-    ) THEN
-        RAISE_APPLICATION_ERROR(-20002, 'El estudiante ya aprobó esta asignatura.');
-    END IF;
-
-    -- 4. Validación de prerrequisitos
-    IF EXISTS (
-        SELECT 1
-        FROM PRERREQUISITO p
-        WHERE p.id_asignatura = v_id_asignatura
-            AND p.id_prerrequisito NOT IN (
-                SELECT id_asignatura
-                FROM HISTORIAL_ACADEMICO
-                WHERE id_estudiante = v_id_estudiante
-                    AND estado = 'APROBADO'
-            )
-        ) THEN
-            RAISE_APPLICATION_ERROR(-20003, 'No cumple los prerrequisitos.');
-    END IF;
-
-    -- 5. Validación de capacidad del grupo
-
-    SELECT COUNT(*) INTO v_cupo_actual
-    FROM DETALLE_MATRICULA
-    WHERE id_grupo = P_ID_GRUPO;
-
-    IF v_cupo_actual >= v_cupo_max THEN
-            RAISE_APPLICATION_ERROR(-20004, 'El grupo está lleno.');
-    END IF;
-
-    -- 6. Validación de choque de horario
-
-    IF EXISTS (
-        SELECT 1
-        FROM DETALLE_MATRICULA d
-        JOIN GRUPO_ASIGNATURA g ON g.id_grupo = d.id_grupo
-        WHERE d.id_matricula_academica = P_ID_MATRICULA
-            AND g.dia = v_dia
-            AND (
-                (g.hora_inicio <= v_hora_fin AND g.hora_fin >= v_hora_inicio)
-                )
-    ) THEN
-            AISE_APPLICATION_ERROR(-20005, 'Existe choque de horario.');
-    END IF;
-
-    -- 7. Validación de créditos según riesgo
-
-    SELECT riesgo INTO v_riesgo
-    FROM ESTUDIANTE
-    WHERE id_estudiante = v_id_estudiante;
-
-    CASE v_riesgo
-            WHEN 0 THEN v_max_creditos := 21;
-    WHEN 1 THEN v_max_creditos := 8;
-    WHEN 2 THEN v_max_creditos := 12;
-    WHEN 3 THEN v_max_creditos := 8;
-    WHEN 4 THEN v_max_creditos := 16;
-    END CASE;
-
-    SELECT a.creditos INTO v_creditos_asig
-    FROM ASIGNATURA a
-    WHERE a.id_asignatura = v_id_asignatura;
-
-    SELECT SUM(a.creditos) INTO v_creditos_actuales
-    FROM DETALLE_MATRICULA d
-             JOIN GRUPO_ASIGNATURA g ON g.id_grupo = d.id_grupo
-             JOIN ASIGNATURA a ON a.id_asignatura = g.id_asignatura
-    WHERE d.id_matricula_academica = P_ID_MATRICULA;
-
-    IF v_creditos_actuales + v_creditos_asig > v_max_creditos THEN
-            RAISE_APPLICATION_ERROR(-20006, 'Excede el límite de créditos según riesgo.');
-    END IF;
-
-    -- 8. Insertar en detalle
-
-    INSERT INTO DETALLE_MATRICULA(id_detalle_matricula, id_matricula_academica, id_grupo)
-    VALUES (SEQ_DETALLE_MAT.NEXTVAL, P_ID_MATRICULA, P_ID_GRUPO);
-
-    P_MENSAJE := 'Grupo agregado correctamente.';
-
-    EXCEPTION
-        WHEN OTHERS THEN
-            P_MENSAJE := SQLERRM;
-    END;
-
-    PROCEDURE QUITAR_GRUPO(
-        P_ID_MATRICULA   IN NUMBER,
-        P_ID_GRUPO       IN NUMBER,
-        P_MENSAJE        OUT VARCHAR2
-    ) IS
-    BEGIN
-    DELETE FROM DETALLE_MATRICULA
-    WHERE id_matricula_academica = P_ID_MATRICULA
-      AND id_grupo = P_ID_GRUPO;
-
-    IF SQL%ROWCOUNT = 0 THEN
-                RAISE_APPLICATION_ERROR(-20002, 'El grupo no está registrado en esta matrícula.');
-    END IF;
-
-            P_MENSAJE := 'Grupo eliminado correctamente.';
-
-    EXCEPTION
-            WHEN OTHERS THEN
-                P_MENSAJE := SQLERRM;
-    END;
-
-    PROCEDURE FINALIZAR_MATRICULA(
-        P_ID_MATRICULA  IN NUMBER,
-        P_MENSAJE       OUT VARCHAR2
-    ) IS
-    BEGIN
-    UPDATE MATRICULA_ACADEMICA
-    SET estado = 'FINALIZADA'
-    WHERE id_matricula_academica = P_ID_MATRICULA;
-
-    P_MENSAJE := 'Matrícula finalizada correctamente.';
-
-    EXCEPTION
-            WHEN OTHERS THEN
-                P_MENSAJE := SQLERRM;
-    END;
+                P_MENSAJE := 'ERROR PL/SQL: ' || SQLERRM;
+    END INICIAR_MATRICULA;
 
 END PKG_MATRICULA;
 /
@@ -309,63 +267,92 @@ CREATE OR REPLACE PACKAGE BODY PKG_GRUPO AS
         P_ID_GRUPO   IN NUMBER,
         P_ID_DOCENTE IN NUMBER,
         P_MENSAJE    OUT VARCHAR2
-    ) IS
-        v_count NUMBER;
+    ) AS
+        v_exists_grupo   NUMBER;
+        v_exists_docente NUMBER;
+        v_exists_asig    NUMBER;
+        v_conflictos     NUMBER;
     BEGIN
-    -- 1. Grupo debe existir
+            P_MENSAJE := NULL;
 
-    SELECT COUNT(*) INTO v_count FROM GRUPO WHERE id_grupo = P_ID_GRUPO;
-    IF v_count = 0 THEN
-                RAISE_APPLICATION_ERROR(-21001, 'El grupo no existe.');
+            ------------------------------------------------
+            -- VALIDAR QUE EL GRUPO EXISTA
+            ------------------------------------------------
+    SELECT COUNT(*) INTO v_exists_grupo
+    FROM GRUPO
+    WHERE id_grupo = P_ID_GRUPO;
+
+    IF v_exists_grupo = 0 THEN
+                P_MENSAJE := 'ERROR: El grupo no existe';
+                RETURN;
     END IF;
 
+            ------------------------------------------------
+            -- VALIDAR QUE EL DOCENTE EXISTA
+            ------------------------------------------------
+    SELECT COUNT(*) INTO v_exists_docente
+    FROM DOCENTE
+    WHERE id_docente = P_ID_DOCENTE;
 
-    -- 2. Docente debe existir
-
-    SELECT COUNT(*) INTO v_count FROM DOCENTE WHERE id_docente = P_ID_DOCENTE;
-    IF v_count = 0 THEN
-                RAISE_APPLICATION_ERROR(-21002, 'El docente no existe.');
+    IF v_exists_docente = 0 THEN
+                P_MENSAJE := 'ERROR: El docente no existe';
+                RETURN;
     END IF;
 
-    -- 3. Validar si ya dicta el grupo
-
-    SELECT COUNT(*) INTO v_count
+            ------------------------------------------------
+            -- VALIDAR QUE NO ESTÉ YA ASIGNADO
+            ------------------------------------------------
+    SELECT COUNT(*) INTO v_exists_asig
     FROM GRUPO_DOCENTE
     WHERE id_grupo = P_ID_GRUPO
       AND id_docente = P_ID_DOCENTE;
 
-    IF v_count > 0 THEN
-                RAISE_APPLICATION_ERROR(-21003, 'El docente ya está asignado al grupo.');
+    IF v_exists_asig > 0 THEN
+                P_MENSAJE := 'ERROR: El docente ya está asignado a este grupo';
+                RETURN;
     END IF;
 
-    -- 4. VALIDACIÓN DE CRUCE DE HORARIO
+            ------------------------------------------------
+            -- VALIDAR CHOQUE DE HORARIOS
+            ------------------------------------------------
 
-    IF EXISTS (
-        SELECT 1
-        FROM CLASE new_c
-        JOIN GRUPO_DOCENTE gd ON gd.id_docente = P_ID_DOCENTE
-        JOIN CLASE old_c ON old_c.id_grupo = gd.id_grupo
-        WHERE new_c.id_grupo = P_ID_GRUPO
-            AND new_c.dia = old_c.dia
-            AND new_c.hora_inicio < old_c.hora_fin
-            AND new_c.hora_fin > old_c.hora_inicio
-    ) THEN
-        RAISE_APPLICATION_ERROR(-21004, 'El docente tiene un cruce de horario.');
+    SELECT COUNT(*) INTO v_conflictos
+    FROM CLASE C1
+             JOIN GRUPO_DOCENTE GD
+                  ON GD.id_docente = P_ID_DOCENTE
+             JOIN CLASE C2
+                  ON C2.id_grupo = GD.id_grupo
+    WHERE C1.id_grupo = P_ID_GRUPO
+      AND C2.id_grupo <> P_ID_GRUPO
+      AND C1.dia = C2.dia
+      AND (
+        (C1.hora_inicio BETWEEN C2.hora_inicio AND C2.hora_fin)
+            OR (C1.hora_fin BETWEEN C2.hora_inicio AND C2.hora_fin)
+            OR (C2.hora_inicio BETWEEN C1.hora_inicio AND C1.hora_fin)
+        );
+
+    IF v_conflictos > 0 THEN
+                P_MENSAJE := 'ERROR: El docente tiene choque de horario con otro grupo';
+                RETURN;
     END IF;
 
+            ------------------------------------------------
+            -- INSERTAR ASIGNACIÓN
+            ------------------------------------------------
+    INSERT INTO GRUPO_DOCENTE (
+        id_grupo,
+        id_docente
+    ) VALUES (
+                 P_ID_GRUPO,
+                 P_ID_DOCENTE
+             );
 
-    -- 5. Insertar relación GRUPO_DOCENTE
-
-    INSERT INTO GRUPO_DOCENTE(id_grupo, id_docente)
-    VALUES (P_ID_GRUPO, P_ID_DOCENTE);
-
-    P_MENSAJE := 'Docente asignado correctamente.';
+    P_MENSAJE := 'Docente asignado correctamente';
 
     EXCEPTION
             WHEN OTHERS THEN
-                P_MENSAJE := SQLERRM;
+                P_MENSAJE := 'ERROR PL/SQL: ' || SQLERRM;
     END ASIGNAR_DOCENTE;
-
 
     PROCEDURE CREAR_CLASE(
         P_ID_GRUPO       IN  NUMBER,

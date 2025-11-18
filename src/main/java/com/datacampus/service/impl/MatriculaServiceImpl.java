@@ -28,6 +28,7 @@ public class MatriculaServiceImpl implements MatriculaService {
             SimpleJdbcCall call = new SimpleJdbcCall(jdbc)
                     .withCatalogName("PKG_MATRICULA")
                     .withProcedureName("INICIAR_MATRICULA")
+                    .withoutProcedureColumnMetaDataAccess()
                     .declareParameters(
                             new SqlParameter("P_ID_ESTUDIANTE", OracleTypes.NUMBER),
                             new SqlParameter("P_ID_PERIODO", OracleTypes.NUMBER),

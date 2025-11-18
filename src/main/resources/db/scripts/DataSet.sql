@@ -441,3 +441,68 @@ INSERT INTO ASIGNATURA_PRERREQUISITO (id_asignatura, id_prerrequisito) VALUES (5
 UPDATE ASIGNATURA
 SET nombre = 'Analisis Numerico'
 WHERE id_asignatura = 30;
+
+INSERT INTO DOCENTE(identificacion, nombres, apellidos, correo) VALUES
+    ('1032456789', 'Carlos Andrés', 'Ramírez López', 'carlos.ramirez@universidad.edu');
+
+INSERT INTO DOCENTE(identificacion, nombres, apellidos, correo) VALUES
+    ('1029384756', 'María Fernanda', 'Gómez Torres', 'maria.gomez@universidad.edu');
+
+INSERT INTO DOCENTE(identificacion, nombres, apellidos, correo) VALUES
+    ('1098765432', 'Luis Eduardo', 'Martínez Ríos', 'luis.martinez@universidad.edu');
+
+INSERT INTO DOCENTE(identificacion, nombres, apellidos, correo) VALUES
+    ('1045678932', 'Ana Sofía', 'Pérez Castillo', 'ana.perez@universidad.edu');
+
+INSERT INTO DOCENTE(identificacion, nombres, apellidos, correo) VALUES
+    ('1012345678', 'Jorge Alberto', 'Sánchez Mora', 'jorge.sanchez@universidad.edu');
+
+INSERT INTO DOCENTE(identificacion, nombres, apellidos, correo) VALUES
+    ('1056789345', 'Valeria', 'Ortiz Herrera', 'valeria.ortiz@universidad.edu');
+
+INSERT INTO DOCENTE(identificacion, nombres, apellidos, correo) VALUES
+    ('1102938475', 'Diana Carolina', 'Muñoz Díaz', 'diana.munoz@universidad.edu');
+
+INSERT INTO DOCENTE(identificacion, nombres, apellidos, correo) VALUES
+    ('1009876543', 'Camilo', 'Vargas Peña', 'camilo.vargas@universidad.edu');
+
+INSERT INTO DOCENTE(identificacion, nombres, apellidos, correo) VALUES
+    ('1075648392', 'Laura', 'Cárdenas Pardo', 'laura.cardenas@universidad.edu');
+
+INSERT INTO DOCENTE(identificacion, nombres, apellidos, correo) VALUES
+    ('1067894321', 'Mateo', 'García Beltrán', 'mateo.garcia@universidad.edu');
+
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+
+INSERT INTO Estudiante (identificacion, nombres, apellidos, telefono, correo, id_sede, id_programa_academico) VALUES
+    ('1096032234', 'Diego Alejandro', 'López Grajales', '3042214330', 'diegoa.lopezg@uqvirtual.edu.co', 1,2);
+
+INSERT INTO Estudiante (identificacion, nombres, apellidos, telefono, correo, id_sede, id_programa_academico) VALUES
+    ('1001234567', 'Juan Pablo', 'Roldán Pérez', '3004567890', 'juan.roldan@correo.edu', 1, 2);
+
+INSERT INTO Estudiante (identificacion, nombres, apellidos, telefono, correo, id_sede, id_programa_academico) VALUES
+    ('1019876543', 'Mariana', 'Torres Gómez', '3012345678', 'mariana.torres@correo.edu', 1, 2);
+
+INSERT INTO Estudiante (identificacion, nombres, apellidos, telefono, correo, id_sede, id_programa_academico) VALUES
+    ('1024567890', 'Santiago', 'Mora Díaz', '3159876543', 'santiago.mora@correo.edu', 1, 2);
+
+INSERT INTO Estudiante (identificacion, nombres, apellidos, telefono, correo, id_sede, id_programa_academico) VALUES
+    ('1033456721', 'Valentina', 'Hernández Ruiz', '3127654321', 'valentina.hernandez@correo.edu', 1, 2);
+
+INSERT INTO Estudiante (identificacion, nombres, apellidos, telefono, correo, id_sede, id_programa_academico) VALUES
+    ('1042345678', 'Daniel', 'Castro López', '3109988776', 'daniel.castro@correo.edu', 1, 2);
+
+INSERT INTO Estudiante (identificacion, nombres, apellidos, telefono, correo, id_sede, id_programa_academico) VALUES
+    ('1059988776', 'Laura Sofía', 'García Peña', '3207766554', 'laura.garcia@correo.edu', 1, 2);
+
+INSERT INTO Estudiante (identificacion, nombres, apellidos, telefono, correo, id_sede, id_programa_academico) VALUES
+    ('1068877665', 'Mateo', 'Salazar Torres', '3001122334', 'mateo.salazar@correo.edu', 1, 2);
+
+INSERT INTO Estudiante (identificacion, nombres, apellidos, telefono, correo, id_sede, id_programa_academico) VALUES
+    ('1077766554', 'Isabella', 'Martínez Silva', '3112233445', 'isabella.martinez@correo.edu', 1, 2);
+
+INSERT INTO Estudiante (identificacion, nombres, apellidos, telefono, correo, id_sede, id_programa_academico) VALUES
+    ('1086655443', 'Andrés Felipe', 'Cortés Ríos', '3198877665', 'andres.cortes@correo.edu', 1, 2);
+
+INSERT INTO Estudiante (identificacion, nombres, apellidos, telefono, correo, id_sede, id_programa_academico) VALUES
+    ('1095544332', 'Camila', 'Vargas Castillo', '3143344556', 'camila.vargas@correo.edu', 1, 2);
