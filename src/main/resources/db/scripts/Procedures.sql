@@ -171,31 +171,33 @@ CREATE OR REPLACE PACKAGE BODY PKG_MATRICULA AS
                 P_MENSAJE := 'ERROR PL/SQL: ' || SQLERRM;
     END INICIAR_MATRICULA;
 
-    PROCEDURE AGREGAR_GRUPO(
-        P_ID_MATRICULA IN NUMBER,
-        P_ID_GRUPO     IN NUMBER,
-        P_MENSAJE      OUT VARCHAR2
-    ) AS
-        v_exists_mat         NUMBER;
-        v_exists_grupo       NUMBER;
-        v_id_estudiante      NUMBER;
-        v_periodo_mat        NUMBER;
-        v_periodo_grupo      NUMBER;
-        v_asignatura_grupo   NUMBER;
-        v_asignatura_rep     NUMBER;
+        --------------------------------------------------------------------------------------------
 
-        -- Cupos
-        v_cupos_usados       NUMBER;
-        v_cupo_maximo        NUMBER;
+        PROCEDURE AGREGAR_GRUPO(
+            P_ID_MATRICULA IN NUMBER,
+            P_ID_GRUPO     IN NUMBER,
+            P_MENSAJE      OUT VARCHAR2
+        ) AS
+            v_exists_mat         NUMBER;
+            v_exists_grupo       NUMBER;
+            v_id_estudiante      NUMBER;
+            v_periodo_mat        NUMBER;
+            v_periodo_grupo      NUMBER;
+            v_asignatura_grupo   NUMBER;
+            v_asignatura_rep     NUMBER;
 
-        -- Choques
-        v_conflictos         NUMBER;
+            -- Cupos
+            v_cupos_usados       NUMBER;
+            v_cupo_maximo        NUMBER;
 
-        -- Riesgo y créditos
-        v_creditos_actuales    NUMBER;
-        v_creditos_asignatura  NUMBER;
-        v_creditos_nuevo       NUMBER;
-        v_creditos_maximos     NUMBER;
+            -- Choques
+            v_conflictos         NUMBER;
+
+            -- Riesgo y créditos
+            v_creditos_actuales    NUMBER;
+            v_creditos_asignatura  NUMBER;
+            v_creditos_nuevo       NUMBER;
+            v_creditos_maximos     NUMBER;
     BEGIN
             P_MENSAJE := NULL;
 
@@ -397,6 +399,116 @@ CREATE OR REPLACE PACKAGE BODY PKG_MATRICULA AS
             WHEN OTHERS THEN
                 P_MENSAJE := 'ERROR PL/SQL inesperado en AGREGAR_GRUPO: ' || SQLERRM;
     END AGREGAR_GRUPO;
+
+        ------------------------------------------------------------------------------------
+
+        PROCEDURE QUITAR_GRUPO(
+            P_ID_MATRICULA IN NUMBER,
+            P_ID_GRUPO     IN NUMBER,
+            P_MENSAJE      OUT VARCHAR2
+        ) AS
+            v_exists_mat          NUMBER;
+            v_exists_grupo        NUMBER;
+            v_inscrito            NUMBER;
+            v_id_estudiante       NUMBER;
+            v_periodo_mat         NUMBER;
+            v_fecha_cancelacion   DATE;
+            v_id_detalle          NUMBER;
+            v_creditos_restantes  NUMBER;
+    BEGIN
+            P_MENSAJE := NULL;
+
+            ------------------------------------------------------------
+            -- 1. Validar existencia de matrícula
+            ------------------------------------------------------------
+    SELECT COUNT(*) INTO v_exists_mat
+    FROM MATRICULA_ACADEMICA
+    WHERE id_matricula = P_ID_MATRICULA;
+
+    IF v_exists_mat = 0 THEN
+                P_MENSAJE := 'ERROR: La matrícula especificada no existe.';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------------------
+            -- 2. Obtener estudiante, periodo y fecha límite de cancelación
+            ------------------------------------------------------------
+    BEGIN
+    SELECT MA.id_estudiante, MA.id_periodo_academico, PA.fecha_cancelacion
+    INTO v_id_estudiante, v_periodo_mat, v_fecha_cancelacion
+    FROM MATRICULA_ACADEMICA MA
+             JOIN PERIODO_ACADEMICO PA
+                  ON MA.id_periodo_academico = PA.id_periodo_academico
+    WHERE MA.id_matricula = P_ID_MATRICULA;
+    EXCEPTION
+                WHEN NO_DATA_FOUND THEN
+                    P_MENSAJE := 'ERROR: No se pudo obtener información académica del periodo.';
+                    RETURN;
+    END;
+
+            ------------------------------------------------------------
+            -- 3. Validar que el grupo exista
+            ------------------------------------------------------------
+    SELECT COUNT(*) INTO v_exists_grupo
+    FROM GRUPO
+    WHERE id_grupo = P_ID_GRUPO;
+
+    IF v_exists_grupo = 0 THEN
+                P_MENSAJE := 'ERROR: El grupo especificado no existe.';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------------------
+            -- 4. Validar que el grupo esté inscrito en esta matrícula
+            ------------------------------------------------------------
+    SELECT COUNT(*) INTO v_inscrito
+    FROM DETALLE_MATRICULA
+    WHERE id_matricula = P_ID_MATRICULA
+      AND id_grupo = P_ID_GRUPO;
+
+    IF v_inscrito = 0 THEN
+                P_MENSAJE := 'ERROR: Este grupo no está inscrito en la matrícula.';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------------------
+            -- 5. VALIDAR FECHA DE CANCELACIÓN (NUEVA REGLA)
+            ------------------------------------------------------------
+            IF SYSDATE > v_fecha_cancelacion THEN
+                P_MENSAJE := 'ERROR: Ya pasó la fecha límite de cancelación (' ||
+                              TO_CHAR(v_fecha_cancelacion, 'YYYY-MM-DD') || ').';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------------------
+            -- 6. Validar que NO quede con 0 créditos (permanece)
+            ------------------------------------------------------------
+    SELECT NVL(SUM(A.numero_creditos),0)
+    INTO v_creditos_restantes
+    FROM DETALLE_MATRICULA DM
+             JOIN GRUPO G ON DM.id_grupo = G.id_grupo
+             JOIN ASIGNATURA A ON G.id_asignatura = A.id_asignatura
+    WHERE DM.id_matricula = P_ID_MATRICULA
+      AND DM.id_grupo <> P_ID_GRUPO;
+
+    IF v_creditos_restantes = 0 THEN
+                P_MENSAJE := 'ERROR: No puede eliminar este grupo porque quedaría sin créditos inscritos.';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------------------
+            -- 7. Eliminar el grupo de la matrícula
+            ------------------------------------------------------------
+    DELETE FROM DETALLE_MATRICULA
+    WHERE id_matricula = P_ID_MATRICULA
+      AND id_grupo = P_ID_GRUPO;
+
+    P_MENSAJE := 'Grupo retirado correctamente.';
+
+    EXCEPTION
+            WHEN OTHERS THEN
+                P_MENSAJE := 'ERROR PL/SQL inesperado en QUITAR_GRUPO: ' || SQLERRM;
+    END QUITAR_GRUPO;
 
 END PKG_MATRICULA;
 /
@@ -732,22 +844,106 @@ END PKG_GRUPO;
 CREATE OR REPLACE PACKAGE BODY PKG_NOTA AS
 
     PROCEDURE CREAR_NOTA(
-        P_ID_DETALLE   IN NUMBER,
-        P_ID_CONFIG    IN NUMBER,
-        P_VALOR        IN NUMBER,
-        P_ID_NOTA      OUT NUMBER,
-        P_MENSAJE      OUT VARCHAR2
-    ) IS
+        P_ID_DETALLE IN NUMBER,
+        P_ID_CONFIG  IN NUMBER,
+        P_VALOR      IN NUMBER,
+        P_ID_NOTA    OUT NUMBER,
+        P_MENSAJE    OUT VARCHAR2
+    ) AS
+        v_detalle_exists   NUMBER;
+        v_config_exists    NUMBER;
+        v_duplica          NUMBER;
     BEGIN
-    INSERT INTO NOTA(id_detalle_matricula, id_configuracion_nota, valor, fecha)
-    VALUES (P_ID_DETALLE, P_ID_CONFIG, P_VALOR, SYSDATE)
+            P_MENSAJE := NULL;
+            P_ID_NOTA := NULL;
+
+            ------------------------------------------------------------
+            -- 1. Validar que el DETALLE exista
+            ------------------------------------------------------------
+    SELECT COUNT(*)
+    INTO v_detalle_exists
+    FROM DETALLE_MATRICULA
+    WHERE id_detalle_matricula = P_ID_DETALLE;
+
+    IF v_detalle_exists = 0 THEN
+                P_MENSAJE := 'ERROR: El detalle de matrícula no existe.';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------------------
+            -- 2. Validar que la configuración exista
+            ------------------------------------------------------------
+    SELECT COUNT(*)
+    INTO v_config_exists
+    FROM CONFIGURACION_NOTA_GRUPO
+    WHERE id_configuracion = P_ID_CONFIG;
+
+    IF v_config_exists = 0 THEN
+                P_MENSAJE := 'ERROR: La configuración de nota no existe.';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------------------
+            -- 3. Validar rango de nota (0 – 5)
+            ------------------------------------------------------------
+            IF P_VALOR < 0 OR P_VALOR > 5 THEN
+                P_MENSAJE := 'ERROR: La nota debe estar entre 0 y 5.';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------------------
+            -- 4. Validar que no exista nota duplicada
+            ------------------------------------------------------------
+    SELECT COUNT(*)
+    INTO v_duplica
+    FROM NOTA
+    WHERE id_detalle_matricula = P_ID_DETALLE
+      AND id_config_notA_grupo = P_ID_CONFIG;
+
+    IF v_duplica > 0 THEN
+                P_MENSAJE := 'ERROR: Ya existe una nota registrada para esta configuración.';
+                RETURN;
+    END IF;
+
+            ------------------------------------------------------------
+            -- 5. Insertar la nota (PK asignada por trigger)
+            ------------------------------------------------------------
+    INSERT INTO NOTA(
+        id_config_nota_grupo,
+        id_detalle_matricula,
+        resultado
+    ) VALUES (
+                 P_ID_CONFIG,
+                 P_ID_DETALLE,
+                 P_VALOR
+             )
         RETURNING id_nota INTO P_ID_NOTA;
 
-    P_MENSAJE := 'Nota registrada correctamente.';
+    ------------------------------------------------------------
+    -- 6. Recalcular nota definitiva
+    ------------------------------------------------------------
+    DECLARE
+    v_definitiva NUMBER;
+    BEGIN
+    SELECT SUM(
+                   N.resultado * (CFG.porcentaje / 100)
+           )
+    INTO v_definitiva
+    FROM NOTA N
+             JOIN CONFIGURACION_NOTA_GRUPO CFG
+                  ON N.id_config_nota_grupo = CFG.id_configuracion
+    WHERE N.id_detalle_matricula = P_ID_DETALLE;
+
+    UPDATE DETALLE_MATRICULA
+    SET nota_definitiva = v_definitiva
+    WHERE id_detalle_matricula = P_ID_DETALLE;
+    END;
+
+            P_MENSAJE := 'Nota registrada correctamente.';
 
     EXCEPTION
-        WHEN OTHERS THEN
-            P_MENSAJE := SQLERRM;
+            WHEN OTHERS THEN
+                P_MENSAJE := 'ERROR PL/SQL en CREAR_NOTA: ' || SQLERRM;
     END CREAR_NOTA;
 
     PROCEDURE EDITAR_NOTA(

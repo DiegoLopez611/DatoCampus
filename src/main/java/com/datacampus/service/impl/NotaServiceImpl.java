@@ -25,6 +25,7 @@ public class NotaServiceImpl  implements NotaService {
             SimpleJdbcCall call = new SimpleJdbcCall(jdbc)
                     .withCatalogName("PKG_NOTA")
                     .withProcedureName("CREAR_NOTA")
+                    .withoutProcedureColumnMetaDataAccess()
                     .declareParameters(
                             new SqlParameter("P_ID_DETALLE", OracleTypes.NUMBER),
                             new SqlParameter("P_ID_CONFIG", OracleTypes.NUMBER),
